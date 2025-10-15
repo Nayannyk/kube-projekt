@@ -1,65 +1,67 @@
-locals {
-  cluster_name = var.cluster_name
+terraform {
+  required_version = ">= 1.5.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
 }
 
+locals {
+  cluster_name = "kube-projekt"
+}
+
+# Create VPC first
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.1"
+
+  name = "${local.cluster_name}-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = slice(data.aws_availability_zones.available.names, 0, 3)
+  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  private_subnets = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+
+  tags = {
+    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+  }
+}
+
+# EKS Cluster (using new syntax)
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "21.3.2"
+  version = "~> 21.0"
 
   cluster_name    = local.cluster_name
-  cluster_version = var.cluster_version
-  subnets         = null # let module create VPC & subnets by default
-  vpc_id          = null
+  cluster_version = "1.30"
 
-  node_groups = {
-    "${var.node_group_name}" = {
-      desired_capacity = var.desired_capacity
-      min_capacity     = var.min_size
-      max_capacity     = var.max_size
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnets
 
-      instance_types = [var.node_instance_type]
-      key_name       = var.ssh_key_name
+  # Manage AWS Auth ConfigMap automatically
+  enable_cluster_creator_admin_permissions = true
 
-      # passing userdata script content
-      user_data = file("${path.module}/eks_userdata.sh")
+  eks_managed_node_groups = {
+    default = {
+      desired_size = 2
+      min_size     = 2
+      max_size     = 5
 
-      asg_desired_capacity = var.desired_capacity
-
-      additional_tags = merge(var.tags, { "kubernetes.io/cluster/${local.cluster_name}" = "owned" })
+      instance_types = ["t3.medium"]
+      key_name       = "0103"
     }
   }
 
-  manage_aws_auth = true
-
-  tags = var.tags
-}
-
-# Configure kubernetes provider using the cluster kubeconfig output from module
-provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  token                  = module.eks.cluster_auth_token # module provides token support
-  load_config_file       = false
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    token                  = module.eks.cluster_auth_token
-    load_config_file       = false
+  tags = {
+    Environment = "dev"
+    Terraform   = "true"
   }
 }
 
-# Simple null_resource to demonstrate when cluster is ready (useful for CI ordering)
-resource "null_resource" "wait_for_cluster" {
-  depends_on = [module.eks]
-
-  provisioner "local-exec" {
-    command = "kubectl get nodes --kubeconfig=${path.module}/kubeconfig || true"
-    environment = {
-      KUBECONFIG = ""
-    }
-  }
-}
-
+data "aws_availability_zones" "available" {}

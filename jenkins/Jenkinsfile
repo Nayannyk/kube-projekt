@@ -1,0 +1,104 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_REGION = "ap-south-1"
+    TF_DIR     = "terraform"
+    ECR_REPO   = "kube-projekt"
+    IMAGE_TAG  = "latest"
+    HELM_CHART_DIR = "helm-chart"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Terraform Init & Apply') {
+      steps {
+        dir("${env.TF_DIR}") {
+          withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+            sh '''
+              export AWS_DEFAULT_REGION=${AWS_REGION}
+              terraform init -upgrade
+              terraform plan -out=tfplan -input=false
+              terraform apply -input=false -auto-approve tfplan
+            '''
+          }
+        }
+      }
+    }
+
+    stage('Prepare Kubeconfig') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          sh '''
+            export AWS_REGION=${AWS_REGION}
+            # Fetch current AWS account id for ECR URL
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" > aws_env_vars
+            # Update kubeconfig to talk to EKS
+            CLUSTER_NAME=$(terraform -chdir=${TF_DIR} output -raw cluster_name)
+            aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+            kubectl get nodes --no-headers
+          '''
+        }
+        script {
+          env.AWS_ACCOUNT_ID = readFile('aws_env_vars').trim().split('=')[1]
+        }
+      }
+    }
+
+    stage('Build Docker image') {
+      steps {
+        script {
+          withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+            sh '''
+              export AWS_REGION=${AWS_REGION}
+              AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+              ECR_REPO_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+              # create ecr repo if not exists
+              aws ecr describe-repositories --repository-names ${ECR_REPO} || aws ecr create-repository --repository-name ${ECR_REPO}
+              aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+              docker build -t ${ECR_REPO_URI}:${IMAGE_TAG} -f Dockerfile .
+              docker push ${ECR_REPO_URI}:${IMAGE_TAG}
+              echo "ECR_IMAGE=${ECR_REPO_URI}:${IMAGE_TAG}" > image_env
+            '''
+            env.ECR_IMAGE = readFile('image_env').trim().split('=')[1]
+          }
+        }
+      }
+    }
+
+    stage('Deploy Helm Chart') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          sh '''
+            export AWS_REGION=${AWS_REGION}
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            ECR_REPO_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+            IMAGE_TAG="latest"
+
+            # Update values.yaml for image
+            sed -i "s|REPO_PLACEHOLDER|${ECR_REPO_URI}|g" ${HELM_CHART_DIR}/values.yaml
+            sed -i "s|tag: .*|tag: \"${IMAGE_TAG}\"|g" ${HELM_CHART_DIR}/values.yaml
+
+            # Ensure helm is initialized and deploy
+            helm upgrade --install kube-projekt ${HELM_CHART_DIR} --namespace default --create-namespace
+          '''
+        }
+      }
+    }
+
+  } // stages
+
+  post {
+    always {
+      echo "Pipeline finished"
+      sh 'kubectl get all --selector=app.kubernetes.io/instance=kube-projekt --all-namespaces || true'
+    }
+  }
+}
+

@@ -1,0 +1,28 @@
+replicaCount: 2
+
+image:
+  repository: "REPO_PLACEHOLDER" # to be replaced by CI with ECR repo URI
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 60
+
+ingress:
+  enabled: false
+

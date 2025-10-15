@@ -1,0 +1,7 @@
+apiVersion: v2
+name: kube-projekt-app
+description: Simple nginx app for kube-projekt
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+

@@ -1,14 +1,3 @@
-terraform {
-  required_version = ">= 1.5.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
 locals {
   cluster_name = "kube-projekt"
 }
@@ -33,7 +22,7 @@ module "vpc" {
   }
 }
 
-# EKS Cluster (using new syntax)
+# EKS Cluster
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
@@ -44,7 +33,6 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  # Manage AWS Auth ConfigMap automatically
   enable_cluster_creator_admin_permissions = true
 
   eks_managed_node_groups = {
@@ -55,6 +43,7 @@ module "eks" {
 
       instance_types = ["t3.medium"]
       key_name       = "0103"
+      user_data      = file("${path.module}/eks_userdata.sh")
     }
   }
 

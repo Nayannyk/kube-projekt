@@ -25,29 +25,36 @@ module "vpc" {
   }
 }
 
-# Create EKS cluster
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  version = "~> 22.0"
 
-  cluster_name    = local.cluster_name
-  cluster_version = var.cluster_version
-
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+  cluster = {
+    name    = "kube-projekt"
+    version = "1.30"
+    vpc_id  = module.vpc.vpc_id
+    subnet_ids = module.vpc.private_subnets
+  }
 
   enable_cluster_creator_admin_permissions = true
 
   eks_managed_node_groups = {
     default = {
-      desired_size = 2
-      min_size     = 2
-      max_size     = 5
+      desired_size   = 2
+      min_size       = 2
+      max_size       = 5
       instance_types = ["t3.medium"]
       key_name       = "0103"
       user_data      = file("${path.module}/eks_userdata.sh")
     }
   }
+
+  tags = {
+    Environment = "dev"
+    Terraform   = "true"
+  }
+}
+
 
   tags = {
     Environment = "dev"

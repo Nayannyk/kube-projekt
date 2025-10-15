@@ -1,8 +1,11 @@
 locals {
-  cluster_name = "kube-projekt"
+  cluster_name = var.cluster_name
 }
 
-# Create VPC first
+# Get availability zones
+data "aws_availability_zones" "available" {}
+
+# Create a VPC
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.1"
@@ -22,13 +25,13 @@ module "vpc" {
   }
 }
 
-# EKS Cluster
+# Create EKS cluster
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
   cluster_name    = local.cluster_name
-  cluster_version = "1.30"
+  cluster_version = var.cluster_version
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -40,7 +43,6 @@ module "eks" {
       desired_size = 2
       min_size     = 2
       max_size     = 5
-
       instance_types = ["t3.medium"]
       key_name       = "0103"
       user_data      = file("${path.module}/eks_userdata.sh")
@@ -52,5 +54,3 @@ module "eks" {
     Terraform   = "true"
   }
 }
-
-data "aws_availability_zones" "available" {}

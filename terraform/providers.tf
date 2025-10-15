@@ -18,9 +18,7 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
-  # Credentials are expected from environment, shared credentials file (~/.aws/credentials),
-  # or CI/CD credential injection (e.g. via Jenkins).
+  region = "ap-south-1"
 }
 
 # Kubernetes and Helm providers will be configured dynamically (after EKS cluster created)

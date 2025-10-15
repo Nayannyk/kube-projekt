@@ -11,9 +11,8 @@ variable "cluster_name" {
 }
 
 variable "cluster_version" {
-  description = "Kubernetes version for the EKS control plane"
-  type        = string
-  default     = "1.27"
+  type    = string
+  default = "1.30"
 }
 
 variable "node_group_name" {
